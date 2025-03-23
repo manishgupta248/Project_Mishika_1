@@ -1,0 +1,41 @@
+# Django Specific
+*.pyc
+__pycache__/
+*.sqlite3
+*.db
+local_settings.py
+media/
+static/
+.env
+.venv/
+venv/
+env/
+*.log
+
+# Next.js Specific
+.next/
+out/
+build/
+node_modules/
+yarn-error.log
+package-lock.json
+yarn.lock
+
+# OS Specific
+.DS_Store
+Thumbs.db
+
+# VS Code Specific
+.vscode/
+
+# JetBrains IDE Specific
+.idea/
+
+# General
+*.swp
+*~
+*.bak
+*.orig
+*.dump
+*.sql
+.DS_Stores

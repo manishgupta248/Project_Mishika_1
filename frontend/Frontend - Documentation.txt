@@ -1,0 +1,515 @@
+# .env.local
+# Environment variables for the Next.js frontend.
+# Do not commit this file to version control; use .env.example as a template.
+
+# Base Configuration
+NEXT_PUBLIC_API_URL=http://localhost:8000
+NEXT_PUBLIC_MEDIA_URL=http://localhost:8000/media/
+
+# Authentication Endpoints
+# These align with backend university/accounts/urls.py
+NEXT_PUBLIC_AUTH_LOGIN_PATH=/auth/login/
+NEXT_PUBLIC_AUTH_LOGOUT_PATH=/auth/logout/
+NEXT_PUBLIC_AUTH_PROFILE_PATH=/auth/me/
+NEXT_PUBLIC_AUTH_REFRESH_PATH=/auth/token/refresh/
+NEXT_PUBLIC_AUTH_REGISTER_PATH=/auth/register/
+
+# Academic Endpoints
+NEXT_PUBLIC_ACADEMIC_DEPARTMENTS_PATH=/academic/departments/
+NEXT_PUBLIC_ACADEMIC_FACULTY_CHOICES_PATH=/academic/faculty-choices/
+
+# Course Endpoints
+NEXT_PUBLIC_COURSES_COURSES_PATH=/courses/courses/
+NEXT_PUBLIC_COURSES_CATEGORY_CHOICES_PATH=/courses/course-category-choices/
+NEXT_PUBLIC_COURSES_TYPE_CHOICES_PATH=/courses/course-type-choices/
+NEXT_PUBLIC_COURSES_CBCS_CATEGORY_CHOICES_PATH=/courses/cbcs-category-choices/
+
+# Syllabi Endpoint
+NEXT_PUBLIC_COURSES_SYLLABI_PATH=/courses/syllabi/
+
+# Frontend-Specific Settings
+NEXT_PUBLIC_REQUEST_TIMEOUT=10000  # Timeout for API requests in milliseconds
+
+================================================================================
+
+// src/lib/api/authClient.js
+/**
+ * Axios client for API requests with automatic token refresh and error handling.
+ * Configured to use HTTP-only cookies for authentication, aligning with backend JWT setup.
+ */
+
+import axios from 'axios';
+
+// Load environment variables
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const AUTH_REFRESH_PATH = process.env.NEXT_PUBLIC_AUTH_REFRESH_PATH || '/auth/refresh/';
+const AUTH_LOGIN_PATH = process.env.NEXT_PUBLIC_AUTH_LOGIN_PATH || '/auth/login/';
+const AUTH_LOGOUT_PATH = process.env.NEXT_PUBLIC_AUTH_LOGOUT_PATH || '/auth/logout/';
+const REQUEST_TIMEOUT = parseInt(process.env.NEXT_PUBLIC_REQUEST_TIMEOUT, 10) || 10000;
+
+// Centralized Axios instance
+const apiClient = axios.create({
+  baseURL: API_BASE_URL,
+  withCredentials: true, // Include cookies in requests
+  timeout: REQUEST_TIMEOUT,
+  headers: {
+    'Content-Type': 'application/json',
+  },
+});
+
+// State for managing token refresh queue
+let failedQueue = [];
+let isRefreshing = false;
+
+/**
+ * Process the queue of failed requests after token refresh attempt.
+ * @param {Error|null} error - Error if refresh failed, null if successful.
+ */
+const processQueue = (error) => {
+  failedQueue.forEach((prom) => (error ? prom.reject(error) : prom.resolve()));
+  failedQueue = [];
+};
+
+// Request Interceptor
+apiClient.interceptors.request.use(
+  (config) => {
+    console.debug(`[API Request] ${config.method.toUpperCase()} ${config.url}`);
+    if (config.data instanceof FormData) {
+      delete config.headers['Content-Type']; // Browser sets multipart boundary
+    }
+    return config;
+  },
+  (error) => {
+    console.error('[Request Error]', error.message);
+    return Promise.reject(error);
+  }
+);
+
+// Response Interceptor (without hooks)
+apiClient.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    const originalRequest = error.config;
+    const status = error.response?.status;
+
+    if (
+      status === 401 &&
+      !originalRequest._retry &&
+      ![AUTH_LOGIN_PATH, AUTH_REFRESH_PATH, AUTH_LOGOUT_PATH].includes(originalRequest.url)
+    ) {
+      originalRequest._retry = true;
+
+      if (!isRefreshing) {
+        isRefreshing = true;
+        console.debug('[Token Refresh] Initiating refresh attempt');
+        try {
+          await apiClient.post(AUTH_REFRESH_PATH, null, { withCredentials: true });
+          console.debug('[Token Refresh] Success');
+          isRefreshing = false;
+          processQueue(null);
+          return apiClient(originalRequest); // Retry original request
+        } catch (refreshError) {
+          console.error('[Token Refresh] Failed:', refreshError.message);
+          isRefreshing = false;
+          processQueue(refreshError);
+          // Redirect to login without logout (requires frontend to handle)
+          if (typeof window !== 'undefined') {
+            window.location.href = '/login';
+          }
+          return Promise.reject(refreshError);
+        }
+      }
+
+      // Queue failed requests during refresh
+      return new Promise((resolve, reject) => {
+        failedQueue.push({
+          resolve: () => resolve(apiClient(originalRequest)),
+          reject: (err) => reject(err),
+        });
+      });
+    }
+
+    console.error(`[API Error ${status || 'N/A'}]`, error.message);
+    return Promise.reject(error);
+  }
+);
+
+export default apiClient;
+
+==========================================================================
+// src/lib/api/authService.js
+/**
+ * Service layer for authentication-related API calls.
+ * Wraps apiClient to provide a clean interface for auth operations.
+ */
+
+import apiClient from './authClient';
+
+/**
+ * Authentication service object.
+ */
+const authService = {
+  /**
+   * Perform a POST request to the specified endpoint.
+   * @param {string} url - The API endpoint path (relative to base URL).
+   * @param {Object|FormData} data - Data to send in the request body.
+   * @param {Object} [config] - Optional Axios config (e.g., headers).
+   * @returns {Promise<Object>} Response data from the API.
+   * @throws {Error} If the request fails.
+   */
+  async post(url, data, config = {}) {
+    try {
+      const response = await apiClient.post(url, data, config);
+      return response.data;
+    } catch (error) {
+      console.error(`[AuthService POST ${url}] Error:`, error.message);
+      throw error;
+    }
+  },
+
+  /**
+   * Perform a GET request to the specified endpoint.
+   * @param {string} url - The API endpoint path (relative to base URL).
+   * @returns {Promise<Object>} Response data from the API.
+   * @throws {Error} If the request fails.
+   */
+  async get(url) {
+    try {
+      const response = await apiClient.get(url);
+      return response.data;
+    } catch (error) {
+      console.error(`[AuthService GET ${url}] Error:`, error.message);
+      throw error;
+    }
+  },
+};
+
+export default authService;
+==============================================================
+// src/stores/authStore.js
+/**
+ * Zustand store for managing authentication state and actions.
+ * Handles login, logout, registration, and profile fetching with HTTP-only cookie-based JWT.
+ */
+
+import { create } from 'zustand';
+import toast from 'react-hot-toast';
+import authService from '@/lib/api/authService';
+
+// Load environment variables
+const AUTH_LOGIN_PATH = process.env.NEXT_PUBLIC_AUTH_LOGIN_PATH;
+const AUTH_LOGOUT_PATH = process.env.NEXT_PUBLIC_AUTH_LOGOUT_PATH;
+const AUTH_REGISTER_PATH = process.env.NEXT_PUBLIC_AUTH_REGISTER_PATH;
+const AUTH_PROFILE_PATH = process.env.NEXT_PUBLIC_AUTH_PROFILE_PATH;
+
+const useAuthStore = create((set) => ({
+  user: null,
+  isAuthenticated: false,
+  isLoading: false,
+
+  /**
+   * Log in a user with email and password.
+   * @param {Object} credentials - { email, password }
+   * @param {Object} router - Next.js router instance
+   */
+  login: async (credentials, router) => {
+    set({ isLoading: true });
+    try {
+      const response = await authService.post(AUTH_LOGIN_PATH, credentials);
+      set({ user: response.user, isAuthenticated: true, isLoading: false });
+      toast.success('Login successful!');
+      router.push('/profile');
+    } catch (error) {
+      console.error('[Login Error]', error.message);
+      set({ isLoading: false });
+      toast.error(error.response?.data?.error || 'Login failed');
+      throw error;
+    }
+  },
+
+  /**
+   * Log out the current user and clear authentication state.
+   * @param {Object} router - Next.js router instance
+   */
+  logout: async (router) => {
+    set({ isLoading: true });
+    try {
+      await authService.post(AUTH_LOGOUT_PATH, {});
+      set({ user: null, isAuthenticated: false, isLoading: false });
+      toast.success('Logged out successfully!');
+      router.push('/login');
+    } catch (error) {
+      console.error('[Logout Error]', error.message);
+      set({ user: null, isAuthenticated: false, isLoading: false });
+      toast.error(error.response?.data?.error || 'Logout failed');
+      router.push('/login');
+      // Don’t throw error; redirect regardless
+    }
+  },
+
+  /**
+   * Register a new user.
+   * @param {Object} data - Registration data (e.g., email, password, first_name)
+   * @param {Object} router - Next.js router instance
+   */
+  register: async (data, router) => {
+    set({ isLoading: true });
+    try {
+      const response = await authService.post(AUTH_REGISTER_PATH, data);
+      set({ user: response.user, isAuthenticated: true, isLoading: false });
+      toast.success('Registration successful!');
+      router.push('/profile');
+    } catch (error) {
+      console.error('[Register Error]', error.message);
+      set({ isLoading: false });
+      toast.error(error.response?.data?.error || 'Registration failed');
+      throw error;
+    }
+  },
+
+  /**
+   * Fetch the current user's profile.
+   * @returns {Promise<Object>} User data
+   */
+  fetchProfile: async () => {
+    set({ isLoading: true });
+    try {
+      const userData = await authService.get(AUTH_PROFILE_PATH);
+      set({ user: userData, isAuthenticated: true, isLoading: false });
+      return userData;
+    } catch (error) {
+      console.error('[Fetch Profile Error]', error.message);
+      set({ isLoading: false });
+      throw error;
+    }
+  },
+
+  /**
+   * Check if the user is authenticated by fetching their profile.
+   * @returns {Promise<boolean>} True if authenticated, false otherwise
+   */
+  checkAuth: async () => {
+    set({ isLoading: true });
+    try {
+      const userData = await authService.get(AUTH_PROFILE_PATH);
+      set({ user: userData, isAuthenticated: true, isLoading: false });
+      return true;
+    } catch (error) {
+      console.debug('[Check Auth] Failed:', error.message);
+      set({ user: null, isAuthenticated: false, isLoading: false });
+      return false;
+    }
+  },
+}));
+
+export default useAuthStore;
+==========================================================================
+// src/app/layout.js
+'use client';
+/**
+ * Root layout component for the Next.js application.
+ * Manages authentication checks and renders the main layout structure.
+ */
+
+import './globals.css';
+import { useEffect, Suspense } from 'react';
+import useAuthStore from '@/stores/authStore'; // Adjusted import
+import { Toaster } from 'react-hot-toast';
+import { usePathname } from 'next/navigation';
+import { Loading } from '@/components/common/Loading';
+import ErrorBoundary from '@/components/common/ErrorBoundary';
+import Footer from '@/components/common/Footer';
+import NavBar from '@/components/common/NavBar';
+import Sidebar from '@/components/common/Sidebar';
+
+export default function RootLayout({ children }) {
+  const { checkAuth, isAuthenticated, isLoading } = useAuthStore(); // Direct destructuring
+  const pathname = usePathname();
+
+  const publicPaths = ['/login', '/register', '/', '/logout'];
+
+  useEffect(() => {
+    const verifyAuth = async () => {
+      if (!publicPaths.includes(pathname)) {
+        try {
+          const isValid = await checkAuth();
+          if (!isValid && typeof window !== 'undefined') {
+            console.debug(`[Layout] Redirecting to /login from ${pathname}`);
+            window.location.href = '/login';
+          }
+        } catch (error) {
+          console.error('[Layout] Auth check error:', error.message);
+          window.location.href = '/login';
+        }
+      }
+    };
+
+    verifyAuth();
+  }, [checkAuth, pathname]);
+
+  if (isLoading && !publicPaths.includes(pathname)) {
+    return (
+      <html lang="en">
+        <body className="flex flex-col min-h-screen bg-gray-100">
+          <Loading />
+        </body>
+      </html>
+    );
+  }
+
+  return (
+    <html lang="en">
+      <body className="flex flex-col min-h-screen bg-gray-100">
+        <ErrorBoundary>
+          <NavBar />
+          <div className="flex flex-1">
+            <Sidebar />
+            <Suspense fallback={<Loading />}>
+              <main className="flex-1 p-4">{children}</main>
+            </Suspense>
+            <Toaster position="top-right" />
+          </div>
+          <Footer />
+        </ErrorBoundary>
+      </body>
+    </html>
+  );
+}
+====================================================================
+// src/components/common/DynamicForm.js
+'use client';
+/**
+ * Reusable dynamic form component with Tailwind styling.
+ * Supports text inputs, textareas, and file uploads with sanitization.
+ */
+
+import { useState } from 'react';
+
+export function DynamicForm({
+  fields,
+  onSubmit,
+  buttonText,
+  errors = {},
+  isLoading = false,
+  extraContent,
+  initialValues = {},
+}) {
+  // Initialize form state with sanitized initial values
+  const [formData, setFormData] = useState(() => {
+    return fields.reduce((acc, field) => {
+      const rawValue = initialValues[field.name] || '';
+      const sanitizedValue = String(rawValue).replace(/\s+/g, ' ').trim();
+      return { ...acc, [field.name]: sanitizedValue };
+    }, {});
+  });
+
+  /**
+   * Handle input changes with sanitization for text and file inputs.
+   * @param {React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>} e - Input event
+   */
+  const handleChange = (e) => {
+    const { name, value, files } = e.target;
+
+    if (files) {
+      setFormData((prev) => ({ ...prev, [name]: files[0] }));
+    } else {
+      const sanitizedValue = value.replace(/\s+/g, ' ').trimStart();
+      setFormData((prev) => ({ ...prev, [name]: sanitizedValue }));
+    }
+  };
+
+  /**
+   * Handle form submission and pass data to the provided handler.
+   * @param {React.FormEvent<HTMLFormElement>} e - Form submission event
+   */
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    try {
+      await onSubmit(formData);
+    } catch (error) {
+      console.error(`[DynamicForm] Submission error for ${buttonText}:`, error.message);
+    }
+  };
+
+  return (
+    <div className="max-w-md mx-auto mt-6 p-6 bg-green-100 border border-green-200 rounded-lg shadow-md">
+      <h1 className="text-2xl font-bold mb-6 text-center text-gray-800">{buttonText}</h1>
+      <form onSubmit={handleSubmit} className="space-y-4">
+        {fields.map((field) => (
+          <div key={field.name}>
+            <label
+              htmlFor={field.name}
+              className="block text-sm font-medium text-gray-700"
+            >
+              {field.label}
+              {field.required && (
+                <span className="text-red-500 ml-1" aria-hidden="true">
+                  *
+                </span>
+              )}
+            </label>
+            {field.type === 'textarea' ? (
+              <textarea
+                id={field.name}
+                name={field.name}
+                value={formData[field.name] || ''}
+                onChange={handleChange}
+                className="mt-1 block w-full p-2 bg-white border border-gray-300 rounded-md focus:ring focus:ring-blue-300 focus:outline-none disabled:bg-gray-100"
+                placeholder={field.placeholder || ''}
+                rows="3"
+                maxLength={field.maxLength || 500}
+                disabled={isLoading}
+                aria-required={field.required || false}
+                aria-describedby={errors[field.name] ? `${field.name}-error` : undefined}
+              />
+            ) : field.type === 'file' ? (
+              <input
+                type="file"
+                id={field.name}
+                name={field.name}
+                onChange={handleChange}
+                className="mt-1 block w-full p-2 bg-white border border-gray-300 rounded-md disabled:bg-gray-100"
+                accept={field.accept || ''}
+                disabled={isLoading}
+                aria-describedby={errors[field.name] ? `${field.name}-error` : undefined}
+              />
+            ) : (
+              <input
+                type={field.type}
+                id={field.name}
+                name={field.name}
+                value={formData[field.name] || ''}
+                onChange={handleChange}
+                className="mt-1 block w-full p-2 bg-white border border-gray-300 rounded-md focus:ring focus:ring-blue-300 focus:outline-none disabled:bg-gray-100"
+                placeholder={field.placeholder || ''}
+                required={field.required || false}
+                disabled={isLoading}
+                aria-required={field.required || false}
+                aria-describedby={errors[field.name] ? `${field.name}-error` : undefined}
+              />
+            )}
+            {errors[field.name] && (
+              <p
+                id={`${field.name}-error`}
+                className="text-red-500 text-sm mt-1"
+                role="alert"
+              >
+                {errors[field.name]}
+              </p>
+            )}
+          </div>
+        ))}
+        <button
+          type="submit"
+          className="w-full bg-blue-600 text-white py-2 rounded-md hover:bg-blue-700 transition disabled:bg-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-300"
+          disabled={isLoading}
+          aria-busy={isLoading}
+        >
+          {isLoading ? 'Submitting...' : buttonText}
+        </button>
+      </form>
+      {extraContent && <div className="mt-4">{extraContent}</div>}
+    </div>
+  );
+}
+===================================================================
