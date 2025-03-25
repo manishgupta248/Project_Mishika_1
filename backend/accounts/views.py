@@ -12,6 +12,7 @@ from rest_framework import status
 from rest_framework_simplejwt.tokens import RefreshToken, TokenError
 from django.contrib.auth import authenticate
 from django.conf import settings
+from .models import CustomUser
 from django.middleware.csrf import get_token
 from .serializers import (
     UserSerializer, RegisterSerializer, LoginSerializer, ChangePasswordSerializer,
@@ -203,20 +204,11 @@ class ChangePasswordView(APIView):
         return response
 
 
+# accounts/views.py
 class TokenRefreshView(APIView):
-    """View for refreshing JWT access tokens using cookies."""
-    permission_classes = [AllowAny]  # No authentication required
+    permission_classes = [AllowAny]
 
     def post(self, request):
-        """
-        Refresh access token using refresh token from cookies.
-
-        Args:
-            request (Request): HTTP request with refresh token in cookies.
-
-        Returns:
-            Response: New access token in cookies or error if refresh fails.
-        """
         refresh_token = request.COOKIES.get(settings.SIMPLE_JWT['REFRESH_COOKIE'])
         if not refresh_token:
             logger.warning("No refresh token provided in request")
@@ -226,11 +218,16 @@ class TokenRefreshView(APIView):
             )
 
         try:
-            # Validate and use the provided refresh token
+            # Validate the provided refresh token
             token = RefreshToken(refresh_token)
+            user_id = token.get('user_id')  # Extract user_id from old token
+            if not user_id:
+                raise TokenError("Refresh token missing user identification")
+
+            # Get the user to associate with new tokens
+            user = CustomUser.objects.get(id=user_id)
             access_token = str(token.access_token)
-            
-            # Prepare response
+
             response = Response(
                 {'message': 'Token refreshed successfully'},
                 status=status.HTTP_200_OK,
@@ -238,7 +235,6 @@ class TokenRefreshView(APIView):
             secure = not settings.DEBUG
             access_lifetime = settings.SIMPLE_JWT['ACCESS_TOKEN_LIFETIME'].total_seconds()
 
-            # Set new access token in cookie
             response.set_cookie(
                 key=settings.SIMPLE_JWT['AUTH_COOKIE'],
                 value=access_token,
@@ -248,12 +244,10 @@ class TokenRefreshView(APIView):
                 max_age=int(access_lifetime),
             )
 
-            # Handle token rotation if enabled
             if settings.SIMPLE_JWT['ROTATE_REFRESH_TOKENS']:
-                # Blacklist the old refresh token
                 token.blacklist()
-                # Generate a new refresh token without requiring request.user
-                new_refresh = RefreshToken()
+                # Create a new refresh token tied to the user
+                new_refresh = RefreshToken.for_user(user)
                 refresh_lifetime = settings.SIMPLE_JWT['REFRESH_TOKEN_LIFETIME'].total_seconds()
                 response.set_cookie(
                     key=settings.SIMPLE_JWT['REFRESH_COOKIE'],
@@ -263,11 +257,17 @@ class TokenRefreshView(APIView):
                     samesite='Strict',
                     max_age=int(refresh_lifetime),
                 )
-                logger.info(f"Token rotated and refreshed for IP: {request.META.get('REMOTE_ADDR')}")
+                logger.info(f"Token rotated and refreshed for user: {user.email}")
             else:
-                logger.info(f"Token refreshed for IP: {request.META.get('REMOTE_ADDR')}")
+                logger.info(f"Token refreshed for user: {user.email}")
 
             return response
+        except CustomUser.DoesNotExist:
+            logger.error("User associated with refresh token not found")
+            return Response(
+                {'error': 'User not found'},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
         except TokenError as e:
             logger.error(f"Token refresh failed: {str(e)}")
             return Response(

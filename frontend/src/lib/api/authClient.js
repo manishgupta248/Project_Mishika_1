@@ -71,14 +71,13 @@ apiClient.interceptors.response.use(
           console.debug('[Token Refresh] Success:', response.data);
           isRefreshing = false;
           processQueue(null);
+          // Ensure the new access token is used in the retry
           return apiClient(originalRequest);
         } catch (refreshError) {
           console.error('[Token Refresh] Failed:', refreshError.message);
           isRefreshing = false;
           processQueue(refreshError);
-          if (typeof window !== 'undefined') {
-            window.location.href = '/login';
-          }
+          window.location.href = '/login';
           return Promise.reject(refreshError);
         }
       }

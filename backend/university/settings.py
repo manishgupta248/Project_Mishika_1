@@ -75,7 +75,7 @@ INSTALLED_APPS = [
     'import_export',
     # Local Apps
     'accounts.apps.AccountsConfig',
-   # 'academics.apps.AcademicsConfig',
+    'academics.apps.AcademicsConfig',
 ]
 
 MIDDLEWARE = [
@@ -88,6 +88,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'django_currentuser.middleware.ThreadLocalUserMiddleware',  # For CurrentUserField
 ]
 
 ROOT_URLCONF = 'university.urls'

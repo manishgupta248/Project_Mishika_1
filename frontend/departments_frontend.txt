@@ -1,0 +1,644 @@
+# .env.local
+# Environment variables for the Next.js frontend.
+# Do not commit this file to version control; use .env.example as a template.
+
+# Base Configuration
+NEXT_PUBLIC_API_URL=http://localhost:8000
+NEXT_PUBLIC_MEDIA_URL=http://localhost:8000/media/
+
+# Authentication Endpoints
+# These align with backend university/accounts/urls.py
+NEXT_PUBLIC_AUTH_LOGIN_PATH=/auth/login/
+NEXT_PUBLIC_AUTH_LOGOUT_PATH=/auth/logout/
+NEXT_PUBLIC_AUTH_PROFILE_PATH=/auth/me/
+NEXT_PUBLIC_AUTH_REFRESH_PATH=/auth/token/refresh/
+NEXT_PUBLIC_AUTH_REGISTER_PATH=/auth/register/
+
+# Academic Endpoints
+# Updated to match Django URL: /academic/ prefix from academics.urls
+NEXT_PUBLIC_ACADEMIC_DEPARTMENTS_PATH=/academic/departments/
+NEXT_PUBLIC_ACADEMIC_FACULTY_CHOICES_PATH=/academic/faculty-choices/
+
+# Course Endpoints (unchanged)
+NEXT_PUBLIC_COURSES_COURSES_PATH=/courses/courses/
+NEXT_PUBLIC_COURSES_CATEGORY_CHOICES_PATH=/courses/course-category-choices/
+NEXT_PUBLIC_COURSES_TYPE_CHOICES_PATH=/courses/course-type-choices/
+NEXT_PUBLIC_COURSES_CBCS_CATEGORY_CHOICES_PATH=/courses/cbcs-category-choices/
+
+# Syllabi Endpoint (unchanged)
+NEXT_PUBLIC_COURSES_SYLLABI_PATH=/courses/syllabi/
+
+# Frontend-Specific Settings
+NEXT_PUBLIC_REQUEST_TIMEOUT=10000  # Timeout for API requests in milliseconds
+================================================================
+src/lib/api/departmentService.js
+
+/**
+ * Service layer for department-related API calls.
+ * Wraps apiClient to provide a clean interface for department operations.
+ */
+
+import apiClient from './authClient';
+
+// Load environment variables
+const DEPARTMENTS_PATH = process.env.NEXT_PUBLIC_ACADEMIC_DEPARTMENTS_PATH;
+const FACULTY_CHOICES_PATH = process.env.NEXT_PUBLIC_ACADEMIC_FACULTY_CHOICES_PATH;
+
+/**
+ * Department service object.
+ */
+const departmentService = {
+  /**
+   * Fetch all departments with optional filtering.
+   * @param {Object} [params] - Query parameters (e.g., { faculty: 'SC', is_deleted: false })
+   * @returns {Promise<Object>} Response data from the API.
+   * @throws {Error} If the request fails.
+   */
+  async getDepartments(params = {}) {
+    try {
+      const response = await apiClient.get(DEPARTMENTS_PATH, { params });
+      return response.data;
+    } catch (error) {
+      console.error(`[DepartmentService GET ${DEPARTMENTS_PATH}] Error:`, error.message);
+      throw error;
+    }
+  },
+
+  /**
+   * Fetch a single department by ID.
+   * @param {string} id - Department ID (e.g., '1000')
+   * @returns {Promise<Object>} Response data from the API.
+   * @throws {Error} If the request fails.
+   */
+  async getDepartment(id) {
+    try {
+      const response = await apiClient.get(`${DEPARTMENTS_PATH}${id}/`);
+      return response.data;
+    } catch (error) {
+      console.error(`[DepartmentService GET ${DEPARTMENTS_PATH}${id}/] Error:`, error.message);
+      throw error;
+    }
+  },
+
+  /**
+   * Create a new department.
+   * @param {Object} data - Department data (e.g., { name, faculty })
+   * @returns {Promise<Object>} Response data from the API.
+   * @throws {Error} If the request fails.
+   */
+  async createDepartment(data) {
+    try {
+      const response = await apiClient.post(DEPARTMENTS_PATH, data);
+      return response.data;
+    } catch (error) {
+      console.error(`[DepartmentService POST ${DEPARTMENTS_PATH}] Error:`, error.message);
+      throw error;
+    }
+  },
+
+  /**
+   * Update an existing department.
+   * @param {string} id - Department ID (e.g., '1000')
+   * @param {Object} data - Updated department data (e.g., { name, faculty })
+   * @returns {Promise<Object>} Response data from the API.
+   * @throws {Error} If the request fails.
+   */
+  async updateDepartment(id, data) {
+    try {
+      const response = await apiClient.put(`${DEPARTMENTS_PATH}${id}/`, data);
+      return response.data;
+    } catch (error) {
+      console.error(`[DepartmentService PUT ${DEPARTMENTS_PATH}${id}/] Error:`, error.message);
+      throw error;
+    }
+  },
+
+  /**
+   * Soft-delete a department.
+   * @param {string} id - Department ID (e.g., '1000')
+   * @returns {Promise<void>} No content on success.
+   * @throws {Error} If the request fails.
+   */
+  async deleteDepartment(id) {
+    try {
+      await apiClient.delete(`${DEPARTMENTS_PATH}${id}/`);
+    } catch (error) {
+      console.error(`[DepartmentService DELETE ${DEPARTMENTS_PATH}${id}/] Error:`, error.message);
+      throw error;
+    }
+  },
+
+  /**
+   * Fetch faculty choices for dropdowns.
+   * @returns {Promise<Object>} Response data from the API.
+   * @throws {Error} If the request fails.
+   */
+  async getFacultyChoices() {
+    try {
+      const response = await apiClient.get(FACULTY_CHOICES_PATH);
+      return response.data;
+    } catch (error) {
+      console.error(`[DepartmentService GET ${FACULTY_CHOICES_PATH}] Error:`, error.message);
+      throw error;
+    }
+  },
+};
+
+export default departmentService;
+=====================================================
+
+src/stores/departmentStore.js
+/**
+ * Zustand store for managing department state and actions.
+ * Handles CRUD operations and faculty choices with integration to departmentService.
+ */
+
+import { create } from 'zustand';
+import toast from 'react-hot-toast';
+import departmentService from '@/lib/api/departmentService';
+
+const useDepartmentStore = create((set, get) => ({
+  departments: [],
+  facultyChoices: [],
+  isLoading: false,
+  error: null,
+
+  /**
+   * Fetch all departments with optional filters.
+   * @param {Object} [filters] - Query filters (e.g., { faculty: 'SC', is_deleted: false })
+   */
+  fetchDepartments: async (filters = {}) => {
+    set({ isLoading: true, error: null });
+    try {
+      const departments = await departmentService.getDepartments(filters);
+      set({ departments, isLoading: false });
+    } catch (error) {
+      console.error('[Fetch Departments Error]', error.message);
+      set({ isLoading: false, error: error.response?.data?.detail || 'Failed to fetch departments' });
+      toast.error('Failed to load departments');
+    }
+  },
+
+  /**
+   * Fetch a single department by ID.
+   * @param {string} id - Department ID
+   * @returns {Promise<Object>} Department data
+   */
+  fetchDepartment: async (id) => {
+    set({ isLoading: true, error: null });
+    try {
+      const department = await departmentService.getDepartment(id);
+      set({ isLoading: false });
+      return department;
+    } catch (error) {
+      console.error('[Fetch Department Error]', error.message);
+      set({ isLoading: false, error: error.response?.data?.detail || 'Failed to fetch department' });
+      toast.error('Failed to load department');
+      throw error;
+    }
+  },
+
+  /**
+   * Create a new department.
+   * @param {Object} data - Department data (e.g., { name, faculty })
+   */
+  createDepartment: async (data) => {
+    set({ isLoading: true, error: null });
+    try {
+      const newDepartment = await departmentService.createDepartment(data);
+      set((state) => ({
+        departments: [...state.departments, newDepartment],
+        isLoading: false,
+      }));
+      toast.success('Department created successfully!');
+    } catch (error) {
+      console.error('[Create Department Error]', error.message);
+      set({ isLoading: false, error: error.response?.data?.detail || 'Failed to create department' });
+      toast.error(error.response?.data?.detail || 'Failed to create department');
+      throw error;
+    }
+  },
+
+  /**
+   * Update an existing department.
+   * @param {string} id - Department ID
+   * @param {Object} data - Updated department data
+   */
+  updateDepartment: async (id, data) => {
+    set({ isLoading: true, error: null });
+    try {
+      const updatedDepartment = await departmentService.updateDepartment(id, data);
+      set((state) => ({
+        departments: state.departments.map((dept) =>
+          dept.id === id ? updatedDepartment : dept
+        ),
+        isLoading: false,
+      }));
+      toast.success('Department updated successfully!');
+    } catch (error) {
+      console.error('[Update Department Error]', error.message);
+      set({ isLoading: false, error: error.response?.data?.detail || 'Failed to update department' });
+      toast.error(error.response?.data?.detail || 'Failed to update department');
+      throw error;
+    }
+  },
+
+  /**
+   * Soft-delete a department.
+   * @param {string} id - Department ID
+   */
+  deleteDepartment: async (id) => {
+    set({ isLoading: true, error: null });
+    try {
+      await departmentService.deleteDepartment(id);
+      set((state) => ({
+        departments: state.departments.map((dept) =>
+          dept.id === id ? { ...dept, is_deleted: true } : dept
+        ),
+        isLoading: false,
+      }));
+      toast.success('Department deleted successfully!');
+    } catch (error) {
+      console.error('[Delete Department Error]', error.message);
+      set({ isLoading: false, error: error.response?.data?.detail || 'Failed to delete department' });
+      toast.error('Failed to delete department');
+      throw error;
+    }
+  },
+
+  /**
+   * Fetch faculty choices for dropdowns.
+   */
+  fetchFacultyChoices: async () => {
+    set({ isLoading: true, error: null });
+    try {
+      const facultyChoices = await departmentService.getFacultyChoices();
+      set({ facultyChoices, isLoading: false });
+    } catch (error) {
+      console.error('[Fetch Faculty Choices Error]', error.message);
+      set({ isLoading: false, error: error.response?.data?.detail || 'Failed to fetch faculty choices' });
+      toast.error('Failed to load faculty choices');
+    }
+  },
+}));
+
+export default useDepartmentStore;
+======================================================
+
+// src/components/common/DynamicForm.js
+'use client';
+/**
+ * Reusable dynamic form component with Tailwind styling and react-hook-form.
+ * Supports text inputs, textareas, and file uploads with sanitization and accessibility.
+ */
+
+import { useEffect, useRef } from 'react';
+import { useForm, Controller } from 'react-hook-form';
+
+export function DynamicForm({
+  fields,
+  onSubmit,
+  buttonText,
+  errors: externalErrors = {},
+  isLoading = false,
+  extraContent,
+  initialValues = {},
+}) {
+  // Initialize react-hook-form
+  const {
+    control,
+    handleSubmit,
+    formState: { errors, isSubmitting },
+    setFocus,
+    setError,
+  } = useForm({
+    defaultValues: fields.reduce((acc, field) => {
+      const rawValue = initialValues[field.name] || '';
+      const sanitizedValue = String(rawValue).replace(/\s+/g, ' ').trim();
+      return { ...acc, [field.name]: sanitizedValue };
+    }, {}),
+    mode: 'onTouched', // Validate on blur or change after first interaction
+  });
+
+  const formRef = useRef(null); // Ref for focus management
+
+  // Sync external errors (e.g., from server) with form state
+  useEffect(() => {
+    Object.entries(externalErrors).forEach(([name, message]) => {
+      setError(name, { type: 'server', message });
+    });
+  }, [externalErrors, setError]);
+
+  // Focus the first error field after submission fails
+  useEffect(() => {
+    if (Object.keys(errors).length > 0) {
+      const firstErrorField = Object.keys(errors)[0];
+      setFocus(firstErrorField);
+    }
+  }, [errors, setFocus]);
+
+  // Handle form submission
+  const onFormSubmit = async (data) => {
+    try {
+      // Sanitize text fields before submission
+      const sanitizedData = Object.entries(data).reduce((acc, [key, value]) => {
+        if (typeof value === 'string') {
+          acc[key] = value.replace(/\s+/g, ' ').trim();
+        } else {
+          acc[key] = value; // File inputs remain unchanged
+        }
+        return acc;
+      }, {});
+      await onSubmit(sanitizedData);
+    } catch (error) {
+      console.error(`[DynamicForm] Submission error for ${buttonText}:`, error.message);
+    }
+  };
+
+  return (
+    <div className="max-w-md mx-auto mt-6 p-6 bg-green-100 border border-green-200 rounded-lg shadow-md">
+      <h1 className="text-2xl font-bold mb-6 text-center text-gray-800">{buttonText}</h1>
+      <form
+        ref={formRef}
+        onSubmit={handleSubmit(onFormSubmit)}
+        className="space-y-4"
+        noValidate // Prevent browser validation to rely on react-hook-form
+        aria-label={`${buttonText} form`}
+      >
+        {fields.map((field) => (
+          <div key={field.name}>
+            <label
+              htmlFor={field.name}
+              className="block text-sm font-medium text-gray-700"
+            >
+              {field.label}
+              {field.required && (
+                <span className="text-red-500 ml-1" aria-hidden="true">
+                  *
+                </span>
+              )}
+            </label>
+            <Controller
+              name={field.name}
+              control={control}
+              rules={{
+                required: field.required ? `${field.label} is required` : false,
+                maxLength: field.maxLength ? { value: field.maxLength, message: `${field.label} exceeds ${field.maxLength} characters` } : undefined,
+              }}
+              render={({ field: { onChange, onBlur, value, ref } }) => {
+                const handleChange = (e) => {
+                  const { value: inputValue, files } = e.target;
+                  if (files) {
+                    onChange(files[0]); // Handle file input
+                  } else {
+                    const sanitizedValue = inputValue.replace(/\s+/g, ' ').trimStart();
+                    onChange(sanitizedValue); // Update form state
+                  }
+                };
+
+                return field.type === 'textarea' ? (
+                  <textarea
+                    id={field.name}
+                    name={field.name}
+                    value={value || ''}
+                    onChange={handleChange}
+                    onBlur={onBlur}
+                    ref={ref}
+                    className="mt-1 block w-full p-2 bg-white border border-gray-300 rounded-md focus:ring focus:ring-blue-300 focus:outline-none disabled:bg-gray-100"
+                    placeholder={field.placeholder || ''}
+                    rows="3"
+                    maxLength={field.maxLength || 500}
+                    disabled={isLoading || isSubmitting}
+                    aria-required={field.required || false}
+                    aria-describedby={
+                      errors[field.name] || externalErrors[field.name]
+                        ? `${field.name}-error`
+                        : undefined
+                    }
+                    aria-invalid={!!(errors[field.name] || externalErrors[field.name])}
+                  />
+                ) : field.type === 'file' ? (
+                  <input
+                    type="file"
+                    id={field.name}
+                    name={field.name}
+                    onChange={handleChange}
+                    onBlur={onBlur}
+                    ref={ref}
+                    className="mt-1 block w-full p-2 bg-white border border-gray-300 rounded-md disabled:bg-gray-100"
+                    accept={field.accept || ''}
+                    disabled={isLoading || isSubmitting}
+                    aria-describedby={
+                      errors[field.name] || externalErrors[field.name]
+                        ? `${field.name}-error`
+                        : undefined
+                    }
+                    aria-invalid={!!(errors[field.name] || externalErrors[field.name])}
+                  />
+                ) : (
+                  <input
+                    type={field.type}
+                    id={field.name}
+                    name={field.name}
+                    value={value || ''}
+                    onChange={handleChange}
+                    onBlur={onBlur}
+                    ref={ref}
+                    className="mt-1 block w-full p-2 bg-white border border-gray-300 rounded-md focus:ring focus:ring-blue-300 focus:outline-none disabled:bg-gray-100"
+                    placeholder={field.placeholder || ''}
+                    disabled={isLoading || isSubmitting}
+                    aria-required={field.required || false}
+                    aria-describedby={
+                      errors[field.name] || externalErrors[field.name]
+                        ? `${field.name}-error`
+                        : undefined
+                    }
+                    aria-invalid={!!(errors[field.name] || externalErrors[field.name])}
+                  />
+                );
+              }}
+            />
+            {(errors[field.name] || externalErrors[field.name]) && (
+              <p
+                id={`${field.name}-error`}
+                className="text-red-500 text-sm mt-1"
+                role="alert"
+              >
+                {errors[field.name]?.message || externalErrors[field.name]}
+              </p>
+            )}
+          </div>
+        ))}
+        <button
+          type="submit"
+          className="w-full bg-blue-600 text-white py-2 rounded-md hover:bg-blue-700 transition disabled:bg-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-300"
+          disabled={isLoading || isSubmitting}
+          aria-busy={isLoading || isSubmitting}
+          aria-label={`Submit ${buttonText}`}
+        >
+          {isLoading || isSubmitting ? 'Submitting...' : buttonText}
+        </button>
+      </form>
+      {extraContent && <div className="mt-4">{extraContent}</div>}
+    </div>
+  );
+}
+=================================================
+
+//src/components/common/GenericTable.js
+
+'use client';
+
+import { useState, useMemo } from 'react';
+
+/**
+ * A reusable table component with sorting, searching, and action buttons.
+ * @param {Object} props
+ * @param {Array<Object>} props.data - The data to display in the table.
+ * @param {Array<{key: string, label: string, sortable?: boolean, render?: (item: Object) => React.ReactNode}>} props.columns - Column configurations.
+ * @param {boolean} [props.loading] - Whether the table is in a loading state.
+ * @param {(item: Object) => void} [props.onEdit] - Callback for editing an item.
+ * @param {(item: Object) => void} [props.onDelete] - Callback for deleting an item.
+ */
+export default function GenericTable({
+  data = [],
+  columns,
+  loading = false,
+  onEdit,
+  onDelete,
+}) {
+  const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' });
+  const [searchTerm, setSearchTerm] = useState('');
+
+  // Handle column sorting
+  const handleSort = (key) => {
+    if (!columns.find((col) => col.key === key)?.sortable) return;
+    setSortConfig((prev) => ({
+      key,
+      direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc',
+    }));
+  };
+
+  // Memoize filtered and sorted data for performance
+  const filteredAndSortedData = useMemo(() => {
+    let result = [...(Array.isArray(data) ? data : [])];
+
+    // Apply search filter
+    if (searchTerm) {
+      const lowerSearch = searchTerm.toLowerCase();
+      result = result.filter((item) =>
+        columns.some((col) =>
+          String(item[col.key] ?? '').toLowerCase().includes(lowerSearch)
+        )
+      );
+    }
+
+    // Apply sorting
+    if (sortConfig.key) {
+      result.sort((a, b) => {
+        const aValue = a[sortConfig.key] ?? '';
+        const bValue = b[sortConfig.key] ?? '';
+        const compare = String(aValue).localeCompare(String(bValue));
+        return sortConfig.direction === 'asc' ? compare : -compare;
+      });
+    }
+
+    return result;
+  }, [data, columns, searchTerm, sortConfig]);
+
+  return (
+    <div className="bg-blue-50 border border-blue-200 p-6 rounded-lg shadow-md">
+      {loading && !data.length ? (
+        <p className="text-gray-500 text-center">Loading...</p>
+      ) : filteredAndSortedData.length === 0 ? (
+        <p className="text-gray-500 text-center">No items found.</p>
+      ) : (
+        <>
+          <div className="mb-4">
+            <input
+              type="text"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Search..."
+              disabled={loading}
+              className="w-full p-2 border border-green-400 rounded-md bg-white shadow-sm focus:ring-2 focus:ring-blue-300 focus:border-green-600 disabled:bg-gray-200 disabled:cursor-not-allowed transition-all duration-200"
+              aria-label="Search table data"
+            />
+          </div>
+          <div className="overflow-x-auto">
+            <table className="min-w-full border-collapse border border-green-400">
+              <thead>
+                <tr className="bg-[#800000] text-white">
+                  {columns.map((col) => (
+                    <th
+                      key={col.key}
+                      onClick={() => col.sortable && handleSort(col.key)}
+                      className={`border border-green-400 p-3 text-center text-sm font-semibold ${
+                        col.sortable
+                          ? 'cursor-pointer hover:bg-[#600000] transition-colors'
+                          : ''
+                      }`}
+                      aria-sort={
+                        col.sortable && sortConfig.key === col.key
+                          ? sortConfig.direction
+                          : 'none'
+                      }
+                    >
+                      {col.label}
+                      {col.sortable && sortConfig.key === col.key && (
+                        <span aria-hidden="true">
+                          {sortConfig.direction === 'asc' ? ' ↑' : ' ↓'}
+                        </span>
+                      )}
+                    </th>
+                  ))}
+                  <th className="border border-green-400 p-3 text-center text-sm font-semibold">
+                    Actions
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredAndSortedData.map((item) => (
+                  <tr
+                    key={item.id || JSON.stringify(item)} // Simplified key logic
+                    className="hover:bg-gray-50 transition-colors duration-150"
+                  >
+                    {columns.map((col) => (
+                      <td
+                        key={col.key}
+                        className="border border-green-400 p-3 text-center"
+                      >
+                        {col.render ? col.render(item) : item[col.key] ?? '-'}
+                      </td>
+                    ))}
+                    <td className="border border-green-400 p-2 text-center">
+                      <button
+                        onClick={() => onEdit?.(item)}
+                        disabled={loading || !onEdit}
+                        className="text-blue-600 hover:text-blue-800 disabled:text-gray-400 mr-4 px-1 transition-colors"
+                        aria-label={`Edit ${item.name || 'item'}`}
+                      >
+                        Edit
+                      </button>
+                      <span className="text-gray-400">|</span>
+                      <button
+                        onClick={() => onDelete?.(item)}
+                        disabled={loading || !onDelete}
+                        className="text-red-600 hover:text-red-800 disabled:text-gray-400 px-2 transition-colors"
+                        aria-label={`Delete ${item.name || 'item'}`}
+                      >
+                        Delete
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+===========================================
+

@@ -18,23 +18,11 @@ urlpatterns = [
 
     # API Documentation Endpoints
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
-    path(
-        'api/docs/',
-        SpectacularSwaggerView.as_view(url_name='schema'),
-        name='swagger-ui',
-    ),
+    path('api/docs/',   SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
 
     # Application Routes
-    path(
-        'auth/',
-        include(('accounts.urls', 'accounts'), namespace='accounts'),
-        name='auth-root',
-    ),
-    # path(
-    #     'academic/',
-    #     include(('academics.urls', 'academics'), namespace='academic'),
-    #     name='academic-root',
-    # ),
+    path('auth/', include(('accounts.urls', 'accounts'), namespace='accounts'), name='auth-root',),
+    path('academic/', include(('academics.urls', 'academics'), namespace='academic'), name='academic-root',),
 
     # Placeholder for Future Apps
     # Uncomment and configure as new apps are developed

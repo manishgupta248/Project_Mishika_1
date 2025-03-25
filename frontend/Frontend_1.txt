@@ -1,37 +1,3 @@
-# .env.local
-# Environment variables for the Next.js frontend.
-# Do not commit this file to version control; use .env.example as a template.
-
-# Base Configuration
-NEXT_PUBLIC_API_URL=http://localhost:8000
-NEXT_PUBLIC_MEDIA_URL=http://localhost:8000/media/
-
-# Authentication Endpoints
-# These align with backend university/accounts/urls.py
-NEXT_PUBLIC_AUTH_LOGIN_PATH=/auth/login/
-NEXT_PUBLIC_AUTH_LOGOUT_PATH=/auth/logout/
-NEXT_PUBLIC_AUTH_PROFILE_PATH=/auth/me/
-NEXT_PUBLIC_AUTH_REFRESH_PATH=/auth/token/refresh/
-NEXT_PUBLIC_AUTH_REGISTER_PATH=/auth/register/
-
-# Academic Endpoints
-NEXT_PUBLIC_ACADEMIC_DEPARTMENTS_PATH=/academic/departments/
-NEXT_PUBLIC_ACADEMIC_FACULTY_CHOICES_PATH=/academic/faculty-choices/
-
-# Course Endpoints
-NEXT_PUBLIC_COURSES_COURSES_PATH=/courses/courses/
-NEXT_PUBLIC_COURSES_CATEGORY_CHOICES_PATH=/courses/course-category-choices/
-NEXT_PUBLIC_COURSES_TYPE_CHOICES_PATH=/courses/course-type-choices/
-NEXT_PUBLIC_COURSES_CBCS_CATEGORY_CHOICES_PATH=/courses/cbcs-category-choices/
-
-# Syllabi Endpoint
-NEXT_PUBLIC_COURSES_SYLLABI_PATH=/courses/syllabi/
-
-# Frontend-Specific Settings
-NEXT_PUBLIC_REQUEST_TIMEOUT=10000  # Timeout for API requests in milliseconds
-
-================================================================================
-
 // src/lib/api/authClient.js
 /**
  * Axios client for API requests with automatic token refresh and error handling.
@@ -98,24 +64,20 @@ apiClient.interceptors.response.use(
       ![AUTH_LOGIN_PATH, AUTH_REFRESH_PATH, AUTH_LOGOUT_PATH].includes(originalRequest.url)
     ) {
       originalRequest._retry = true;
-
       if (!isRefreshing) {
         isRefreshing = true;
-        console.debug('[Token Refresh] Initiating refresh attempt');
         try {
-          await apiClient.post(AUTH_REFRESH_PATH, null, { withCredentials: true });
-          console.debug('[Token Refresh] Success');
+          const response = await apiClient.post(AUTH_REFRESH_PATH, {}, { withCredentials: true });
+          console.debug('[Token Refresh] Success:', response.data);
           isRefreshing = false;
           processQueue(null);
-          return apiClient(originalRequest); // Retry original request
+          // Ensure the new access token is used in the retry
+          return apiClient(originalRequest);
         } catch (refreshError) {
           console.error('[Token Refresh] Failed:', refreshError.message);
           isRefreshing = false;
           processQueue(refreshError);
-          // Redirect to login without logout (requires frontend to handle)
-          if (typeof window !== 'undefined') {
-            window.location.href = '/login';
-          }
+          window.location.href = '/login';
           return Promise.reject(refreshError);
         }
       }
@@ -135,8 +97,7 @@ apiClient.interceptors.response.use(
 );
 
 export default apiClient;
-
-==========================================================================
+===========================================================
 // src/lib/api/authService.js
 /**
  * Service layer for authentication-related API calls.
@@ -185,7 +146,7 @@ const authService = {
 };
 
 export default authService;
-==============================================================
+============================================================
 // src/stores/authStore.js
 /**
  * Zustand store for managing authentication state and actions.
@@ -235,16 +196,17 @@ const useAuthStore = create((set) => ({
     set({ isLoading: true });
     try {
       await authService.post(AUTH_LOGOUT_PATH, {});
-      set({ user: null, isAuthenticated: false, isLoading: false });
+      console.debug('[Logout] Success');
       toast.success('Logged out successfully!');
-      router.push('/login');
     } catch (error) {
-      console.error('[Logout Error]', error.message);
-      set({ user: null, isAuthenticated: false, isLoading: false });
-      toast.error(error.response?.data?.error || 'Logout failed');
-      router.push('/login');
-      // Don’t throw error; redirect regardless
+      console.warn('[Logout] Failed:', error.message);
     }
+    set({ user: null, isAuthenticated: false, isLoading: false });
+    // Clear cookies (optional, if backend doesn’t)
+    document.cookie.split(';').forEach((c) => {
+      document.cookie = c.replace(/^ +/, '').replace(/=.*/, '=;expires=' + new Date().toUTCString() + ';path=/');
+    });
+    router.push('/login');
   },
 
   /**
@@ -303,129 +265,72 @@ const useAuthStore = create((set) => ({
 }));
 
 export default useAuthStore;
-==========================================================================
-// src/app/layout.js
-'use client';
-/**
- * Root layout component for the Next.js application.
- * Manages authentication checks and renders the main layout structure.
- */
-
-import './globals.css';
-import { useEffect, Suspense } from 'react';
-import useAuthStore from '@/stores/authStore'; // Adjusted import
-import { Toaster } from 'react-hot-toast';
-import { usePathname } from 'next/navigation';
-import { Loading } from '@/components/common/Loading';
-import ErrorBoundary from '@/components/common/ErrorBoundary';
-import Footer from '@/components/common/Footer';
-import NavBar from '@/components/common/NavBar';
-import Sidebar from '@/components/common/Sidebar';
-
-export default function RootLayout({ children }) {
-  const { checkAuth, isAuthenticated, isLoading } = useAuthStore(); // Direct destructuring
-  const pathname = usePathname();
-
-  const publicPaths = ['/login', '/register', '/', '/logout'];
-
-  useEffect(() => {
-    const verifyAuth = async () => {
-      if (!publicPaths.includes(pathname)) {
-        try {
-          const isValid = await checkAuth();
-          if (!isValid && typeof window !== 'undefined') {
-            console.debug(`[Layout] Redirecting to /login from ${pathname}`);
-            window.location.href = '/login';
-          }
-        } catch (error) {
-          console.error('[Layout] Auth check error:', error.message);
-          window.location.href = '/login';
-        }
-      }
-    };
-
-    verifyAuth();
-  }, [checkAuth, pathname]);
-
-  if (isLoading && !publicPaths.includes(pathname)) {
-    return (
-      <html lang="en">
-        <body className="flex flex-col min-h-screen bg-gray-100">
-          <Loading />
-        </body>
-      </html>
-    );
-  }
-
-  return (
-    <html lang="en">
-      <body className="flex flex-col min-h-screen bg-gray-100">
-        <ErrorBoundary>
-          <NavBar />
-          <div className="flex flex-1">
-            <Sidebar />
-            <Suspense fallback={<Loading />}>
-              <main className="flex-1 p-4">{children}</main>
-            </Suspense>
-            <Toaster position="top-right" />
-          </div>
-          <Footer />
-        </ErrorBoundary>
-      </body>
-    </html>
-  );
-}
-====================================================================
+=====================================================
 // src/components/common/DynamicForm.js
 'use client';
 /**
- * Reusable dynamic form component with Tailwind styling.
- * Supports text inputs, textareas, and file uploads with sanitization.
+ * Reusable dynamic form component with Tailwind styling and react-hook-form.
+ * Supports text inputs, textareas, and file uploads with sanitization and accessibility.
  */
 
-import { useState } from 'react';
+import { useEffect, useRef } from 'react';
+import { useForm, Controller } from 'react-hook-form';
 
 export function DynamicForm({
   fields,
   onSubmit,
   buttonText,
-  errors = {},
+  errors: externalErrors = {},
   isLoading = false,
   extraContent,
   initialValues = {},
 }) {
-  // Initialize form state with sanitized initial values
-  const [formData, setFormData] = useState(() => {
-    return fields.reduce((acc, field) => {
+  // Initialize react-hook-form
+  const {
+    control,
+    handleSubmit,
+    formState: { errors, isSubmitting },
+    setFocus,
+    setError,
+  } = useForm({
+    defaultValues: fields.reduce((acc, field) => {
       const rawValue = initialValues[field.name] || '';
       const sanitizedValue = String(rawValue).replace(/\s+/g, ' ').trim();
       return { ...acc, [field.name]: sanitizedValue };
-    }, {});
+    }, {}),
+    mode: 'onTouched', // Validate on blur or change after first interaction
   });
 
-  /**
-   * Handle input changes with sanitization for text and file inputs.
-   * @param {React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>} e - Input event
-   */
-  const handleChange = (e) => {
-    const { name, value, files } = e.target;
+  const formRef = useRef(null); // Ref for focus management
 
-    if (files) {
-      setFormData((prev) => ({ ...prev, [name]: files[0] }));
-    } else {
-      const sanitizedValue = value.replace(/\s+/g, ' ').trimStart();
-      setFormData((prev) => ({ ...prev, [name]: sanitizedValue }));
+  // Sync external errors (e.g., from server) with form state
+  useEffect(() => {
+    Object.entries(externalErrors).forEach(([name, message]) => {
+      setError(name, { type: 'server', message });
+    });
+  }, [externalErrors, setError]);
+
+  // Focus the first error field after submission fails
+  useEffect(() => {
+    if (Object.keys(errors).length > 0) {
+      const firstErrorField = Object.keys(errors)[0];
+      setFocus(firstErrorField);
     }
-  };
+  }, [errors, setFocus]);
 
-  /**
-   * Handle form submission and pass data to the provided handler.
-   * @param {React.FormEvent<HTMLFormElement>} e - Form submission event
-   */
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  // Handle form submission
+  const onFormSubmit = async (data) => {
     try {
-      await onSubmit(formData);
+      // Sanitize text fields before submission
+      const sanitizedData = Object.entries(data).reduce((acc, [key, value]) => {
+        if (typeof value === 'string') {
+          acc[key] = value.replace(/\s+/g, ' ').trim();
+        } else {
+          acc[key] = value; // File inputs remain unchanged
+        }
+        return acc;
+      }, {});
+      await onSubmit(sanitizedData);
     } catch (error) {
       console.error(`[DynamicForm] Submission error for ${buttonText}:`, error.message);
     }
@@ -434,7 +339,13 @@ export function DynamicForm({
   return (
     <div className="max-w-md mx-auto mt-6 p-6 bg-green-100 border border-green-200 rounded-lg shadow-md">
       <h1 className="text-2xl font-bold mb-6 text-center text-gray-800">{buttonText}</h1>
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form
+        ref={formRef}
+        onSubmit={handleSubmit(onFormSubmit)}
+        className="space-y-4"
+        noValidate // Prevent browser validation to rely on react-hook-form
+        aria-label={`${buttonText} form`}
+      >
         {fields.map((field) => (
           <div key={field.name}>
             <label
@@ -448,53 +359,93 @@ export function DynamicForm({
                 </span>
               )}
             </label>
-            {field.type === 'textarea' ? (
-              <textarea
-                id={field.name}
-                name={field.name}
-                value={formData[field.name] || ''}
-                onChange={handleChange}
-                className="mt-1 block w-full p-2 bg-white border border-gray-300 rounded-md focus:ring focus:ring-blue-300 focus:outline-none disabled:bg-gray-100"
-                placeholder={field.placeholder || ''}
-                rows="3"
-                maxLength={field.maxLength || 500}
-                disabled={isLoading}
-                aria-required={field.required || false}
-                aria-describedby={errors[field.name] ? `${field.name}-error` : undefined}
-              />
-            ) : field.type === 'file' ? (
-              <input
-                type="file"
-                id={field.name}
-                name={field.name}
-                onChange={handleChange}
-                className="mt-1 block w-full p-2 bg-white border border-gray-300 rounded-md disabled:bg-gray-100"
-                accept={field.accept || ''}
-                disabled={isLoading}
-                aria-describedby={errors[field.name] ? `${field.name}-error` : undefined}
-              />
-            ) : (
-              <input
-                type={field.type}
-                id={field.name}
-                name={field.name}
-                value={formData[field.name] || ''}
-                onChange={handleChange}
-                className="mt-1 block w-full p-2 bg-white border border-gray-300 rounded-md focus:ring focus:ring-blue-300 focus:outline-none disabled:bg-gray-100"
-                placeholder={field.placeholder || ''}
-                required={field.required || false}
-                disabled={isLoading}
-                aria-required={field.required || false}
-                aria-describedby={errors[field.name] ? `${field.name}-error` : undefined}
-              />
-            )}
-            {errors[field.name] && (
+            <Controller
+              name={field.name}
+              control={control}
+              rules={{
+                required: field.required ? `${field.label} is required` : false,
+                maxLength: field.maxLength ? { value: field.maxLength, message: `${field.label} exceeds ${field.maxLength} characters` } : undefined,
+              }}
+              render={({ field: { onChange, onBlur, value, ref } }) => {
+                const handleChange = (e) => {
+                  const { value: inputValue, files } = e.target;
+                  if (files) {
+                    onChange(files[0]); // Handle file input
+                  } else {
+                    const sanitizedValue = inputValue.replace(/\s+/g, ' ').trimStart();
+                    onChange(sanitizedValue); // Update form state
+                  }
+                };
+
+                return field.type === 'textarea' ? (
+                  <textarea
+                    id={field.name}
+                    name={field.name}
+                    value={value || ''}
+                    onChange={handleChange}
+                    onBlur={onBlur}
+                    ref={ref}
+                    className="mt-1 block w-full p-2 bg-white border border-gray-300 rounded-md focus:ring focus:ring-blue-300 focus:outline-none disabled:bg-gray-100"
+                    placeholder={field.placeholder || ''}
+                    rows="3"
+                    maxLength={field.maxLength || 500}
+                    disabled={isLoading || isSubmitting}
+                    aria-required={field.required || false}
+                    aria-describedby={
+                      errors[field.name] || externalErrors[field.name]
+                        ? `${field.name}-error`
+                        : undefined
+                    }
+                    aria-invalid={!!(errors[field.name] || externalErrors[field.name])}
+                  />
+                ) : field.type === 'file' ? (
+                  <input
+                    type="file"
+                    id={field.name}
+                    name={field.name}
+                    onChange={handleChange}
+                    onBlur={onBlur}
+                    ref={ref}
+                    className="mt-1 block w-full p-2 bg-white border border-gray-300 rounded-md disabled:bg-gray-100"
+                    accept={field.accept || ''}
+                    disabled={isLoading || isSubmitting}
+                    aria-describedby={
+                      errors[field.name] || externalErrors[field.name]
+                        ? `${field.name}-error`
+                        : undefined
+                    }
+                    aria-invalid={!!(errors[field.name] || externalErrors[field.name])}
+                  />
+                ) : (
+                  <input
+                    type={field.type}
+                    id={field.name}
+                    name={field.name}
+                    value={value || ''}
+                    onChange={handleChange}
+                    onBlur={onBlur}
+                    ref={ref}
+                    className="mt-1 block w-full p-2 bg-white border border-gray-300 rounded-md focus:ring focus:ring-blue-300 focus:outline-none disabled:bg-gray-100"
+                    placeholder={field.placeholder || ''}
+                    disabled={isLoading || isSubmitting}
+                    aria-required={field.required || false}
+                    aria-describedby={
+                      errors[field.name] || externalErrors[field.name]
+                        ? `${field.name}-error`
+                        : undefined
+                    }
+                    aria-invalid={!!(errors[field.name] || externalErrors[field.name])}
+                  />
+                );
+              }}
+            />
+            {(errors[field.name] || externalErrors[field.name]) && (
               <p
                 id={`${field.name}-error`}
                 className="text-red-500 text-sm mt-1"
                 role="alert"
               >
-                {errors[field.name]}
+                {errors[field.name]?.message || externalErrors[field.name]}
               </p>
             )}
           </div>
@@ -502,14 +453,34 @@ export function DynamicForm({
         <button
           type="submit"
           className="w-full bg-blue-600 text-white py-2 rounded-md hover:bg-blue-700 transition disabled:bg-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-300"
-          disabled={isLoading}
-          aria-busy={isLoading}
+          disabled={isLoading || isSubmitting}
+          aria-busy={isLoading || isSubmitting}
+          aria-label={`Submit ${buttonText}`}
         >
-          {isLoading ? 'Submitting...' : buttonText}
+          {isLoading || isSubmitting ? 'Submitting...' : buttonText}
         </button>
       </form>
       {extraContent && <div className="mt-4">{extraContent}</div>}
     </div>
   );
 }
-===================================================================
+========================================================
+// src/components/common/ErrorBoundary.js
+'use client';
+import { Component } from 'react';
+export default class ErrorBoundary extends Component {
+  state = { hasError: false };
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+  componentDidCatch(error) {
+    console.error('[ErrorBoundary] Caught error:', error.message);
+  }
+  render() {
+    if (this.state.hasError) {
+      return <div className="p-4 text-red-500">Something went wrong.</div>;
+    }
+    return this.props.children;
+  }
+}
+=========================================================
