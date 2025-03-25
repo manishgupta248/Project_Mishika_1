@@ -1,0 +1,509 @@
+# courses/models.py
+from django.db import models
+from django.core.exceptions import ValidationError  # Correct import for ValidationError
+from django_currentuser.db.models import CurrentUserField
+from enum import Enum
+from .validators import validate_pdf
+from academics.models import Department
+
+# === ENUM DEFINITIONS ===
+class CourseCategory(Enum):
+    """Enum for course category options."""
+    COMPULSORY = "Compulsory"
+    ELECTIVE = "Elective"
+
+    @classmethod
+    def choices(cls):
+        return [(key.name, key.value) for key in cls]
+
+
+class CourseType(Enum):
+    """Enum for different types of courses."""
+    DISSERTATION = "Dissertation"
+    LABORATORY = "Laboratory"
+    PRACTICAL = "Practical"
+    PROJECT = "Project"
+    THEORY = "Theory"
+    THEORY_AND_PRACTICAL = "Theory and Practical"
+    TUTORIAL = "Tutorial"
+
+    @classmethod
+    def choices(cls):
+        return [(key.name, key.value) for key in cls]
+
+
+class CBCSCategory(Enum):
+    """Enum for CBCS (Choice Based Credit System) categories."""
+    MAJOR = "Major"
+    MINOR = "Minor"
+    CORE = "Core"
+    DSE = "Discipline Specific Elective"
+    GE = "Generic Elective"
+    OE = "Open Elective"
+    VAC = "Value Added Course"
+    AECC = "Ability Enhancement Compulsory Course"
+    SEC = "Skill Enhancement Course"
+    MDC = "Multi-Disciplinary Course"
+    IDC = "Inter-Disciplinary Course"
+
+    @classmethod
+    def choices(cls):
+        return [(key.name, key.value) for key in cls]
+
+
+# === ABSTRACT BASE MODEL ===
+class BaseModel(models.Model):
+    """Abstract base model providing common fields for auditing."""
+    created_by = CurrentUserField(
+        null=True,
+        related_name='%(class)s_created',
+        editable=False,
+        help_text="User who created this record (auto-filled)."
+    )
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+        editable=False,
+        help_text="Timestamp when the record was created."
+    )
+    updated_by = CurrentUserField(
+        null=True,
+        related_name='%(class)s_updated',
+        editable=False,
+        help_text="User who last updated this record (auto-filled)."
+    )
+    updated_at = models.DateTimeField(
+        auto_now=True,
+        editable=False,
+        help_text="Timestamp when the record was last updated."
+    )
+    is_deleted = models.BooleanField(
+        default=False,
+        help_text="Flag for soft deletion."
+    )
+
+    class Meta:
+        abstract = True
+
+    @property
+    def is_active(self):
+        return not self.is_deleted
+
+
+# === COURSE MODEL ===
+class Course(BaseModel):
+    """Represents an academic course with unique identification and metadata."""
+    course_code = models.CharField(
+        max_length=10,
+        unique=True,
+        primary_key=True,
+        help_text="Unique identifier for the course (e.g., CS101).",
+        db_index=True
+    )
+    course_name = models.CharField(
+        max_length=255,
+        help_text="Full name of the course (e.g., Introduction to Programming)."
+    )
+    course_category = models.CharField(
+        max_length=10,
+        choices=CourseCategory.choices(),
+        default=CourseCategory.COMPULSORY.name,
+        help_text="Whether the course is compulsory or elective."
+    )
+    type = models.CharField(
+        max_length=20,
+        choices=CourseType.choices(),
+        default=CourseType.THEORY.name,
+        help_text="Type of course delivery."
+    )
+    cbcs_category = models.CharField(
+        max_length=25,
+        choices=CBCSCategory.choices(),
+        default=CBCSCategory.CORE.name,
+        help_text="CBCS classification of the course."
+    )
+    maximum_credit = models.PositiveSmallIntegerField(
+        choices=[(i, str(i)) for i in range(21)],
+        default=0,
+        help_text="Maximum credit points (0-20)."
+    )
+    discipline = models.ForeignKey(
+        Department,
+        on_delete=models.CASCADE,
+        related_name='courses',
+        help_text="Department responsible for the course."
+    )
+
+    class Meta:
+        ordering = ['course_code']
+        indexes = [
+            models.Index(fields=['course_code']),
+            models.Index(fields=['discipline']),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                check=models.Q(maximum_credit__gte=0) & models.Q(maximum_credit__lte=20),
+                name='credit_range_check'
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.course_code} - {self.course_name}"
+
+    # def clean(self):
+    #     """Custom validation for the model."""
+    #     if not self.course_code.isalnum():
+    #         raise ValidationError("Course code must be alphanumeric.")  # Corrected import
+
+
+# === SYLLABUS MODEL ===
+class Syllabus(BaseModel):
+    """Represents a syllabus version for a course."""
+    course = models.ForeignKey(
+        Course,
+        on_delete=models.CASCADE,
+        to_field='course_code',
+        related_name='syllabi',
+        help_text="Associated course for this syllabus."
+    )
+    course_name = models.CharField(
+        max_length=255,
+        editable=False,
+        help_text="Automatically populated from the associated course."
+    )
+    syllabus_file = models.FileField(
+        upload_to='syllabi/%Y/%m/%d/',
+        validators=[validate_pdf],
+        max_length=255,
+        help_text="PDF file containing the syllabus."
+    )
+    version = models.CharField(
+        max_length=10,
+        default='1.0',
+        help_text="Syllabus version number (e.g., 1.0, 2.1)."
+    )
+    description = models.TextField(
+        blank=True,
+        null=True,
+        help_text="Optional notes about this syllabus version."
+    )
+    uploaded_by = CurrentUserField(
+        related_name='uploaded_syllabi',
+        editable=False,
+        help_text="User who originally uploaded this syllabus (auto-filled)."
+    )
+    uploaded_at = models.DateTimeField(
+        auto_now_add=True,
+        editable=False,
+        help_text="Timestamp when the syllabus was uploaded."
+    )
+
+    class Meta:
+        verbose_name_plural = 'Syllabi'
+        ordering = ['course', '-version']
+        unique_together = ('course', 'version')
+        indexes = [
+            models.Index(fields=['course', 'version']),
+            models.Index(fields=['uploaded_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.course.course_code} - v{self.version}"
+
+    def save(self, *args, **kwargs):
+        self.course_name = self.course.course_name
+        super().save(*args, **kwargs)
+
+    def clean(self):
+        """Custom validation for syllabus."""
+        import re
+        if not re.match(r'^\d+\.\d+$', self.version):
+            raise ValidationError("Version must be in format 'X.Y' (e.g., 1.0).")  # Corrected import
+=============================================================
+# courses/serializers.py
+from rest_framework import serializers
+from .models import Course, Syllabus, Department
+
+class ChoiceSerializer(serializers.Serializer):
+    """Serializer for Enum choices to provide value-label pairs for frontend."""
+    value = serializers.CharField(source='name')
+    label = serializers.CharField()
+
+    def to_representation(self, instance):
+        return {'value': instance[0], 'label': instance[1]}
+
+class CourseSerializer(serializers.ModelSerializer):
+    """Serializer for Course model CRUD operations."""
+    created_by = serializers.StringRelatedField(read_only=True)
+    updated_by = serializers.StringRelatedField(read_only=True)
+    discipline = serializers.PrimaryKeyRelatedField(queryset=Department.objects.all())
+
+    class Meta:
+        model = Course
+        fields = [
+            'course_code', 'course_name', 'course_category', 'type', 'cbcs_category',
+            'maximum_credit', 'discipline', 'created_by', 'created_at', 'updated_by',
+            'updated_at', 'is_deleted'
+        ]
+        read_only_fields = ['created_by', 'created_at', 'updated_by', 'updated_at']
+
+    def validate(self, data):
+        if 'course_code' in data and not data['course_code'].isalnum():
+            raise serializers.ValidationError({"course_code": "Course code must be alphanumeric."})
+        return data
+
+class SyllabusSerializer(serializers.ModelSerializer):
+    """Serializer for Syllabus model CRUD operations."""
+    uploaded_by = serializers.StringRelatedField(read_only=True)
+    updated_by = serializers.StringRelatedField(read_only=True)
+    course = serializers.PrimaryKeyRelatedField(queryset=Course.objects.filter(is_deleted=False))
+    syllabus_file = serializers.FileField(max_length=255, use_url=True)
+
+    class Meta:
+        model = Syllabus
+        fields = [
+            'id', 'course', 'course_name', 'syllabus_file', 'uploaded_by', 'uploaded_at',
+            'updated_by', 'updated_at', 'description', 'version', 'is_deleted'
+        ]
+        read_only_fields = ['course_name', 'uploaded_by', 'uploaded_at', 'updated_by', 'updated_at']
+
+    def validate_version(self, value):
+        import re
+        if not re.match(r'^\d+\.\d+$', value):
+            raise serializers.ValidationError("Version must be in format 'X.Y' (e.g., 1.0).")
+        return value
+
+    def validate_syllabus_file(self, value):
+        from .validators import validate_pdf
+        validate_pdf(value)
+        return value
+=================================================================
+# courses/views.py
+from rest_framework import viewsets, status
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework.permissions import IsAuthenticated, IsAdminUser, AllowAny
+from django_filters.rest_framework import DjangoFilterBackend
+from rest_framework.filters import SearchFilter, OrderingFilter
+from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiExample
+from drf_spectacular.types import OpenApiTypes
+from .models import Course, Syllabus, CourseCategory, CourseType, CBCSCategory
+from .serializers import CourseSerializer, SyllabusSerializer, ChoiceSerializer
+from rest_framework.pagination import PageNumberPagination
+
+class CoursePagination(PageNumberPagination):
+    """Pagination settings for Course API."""
+    page_size = 10
+    page_size_query_param = 'limit'
+    max_page_size = 100
+
+class SyllabusPagination(PageNumberPagination):
+    """Pagination settings for Syllabus API."""
+    page_size = 5
+    page_size_query_param = 'limit'
+    max_page_size = 50
+
+@extend_schema(
+    tags=['Courses'],
+    responses={200: CourseSerializer(many=True)},
+    parameters=[
+        OpenApiParameter(name='discipline', type=OpenApiTypes.INT, location=OpenApiParameter.QUERY,
+                         description='Filter by department ID'),
+        OpenApiParameter(name='course_category', type=OpenApiTypes.STR, location=OpenApiParameter.QUERY,
+                         description='Filter by course category (e.g., COMPULSORY, ELECTIVE)'),
+        OpenApiParameter(name='type', type=OpenApiTypes.STR, location=OpenApiParameter.QUERY,
+                         description='Filter by course type (e.g., THEORY, PRACTICAL)'),
+        OpenApiParameter(name='cbcs_category', type=OpenApiTypes.STR, location=OpenApiParameter.QUERY,
+                         description='Filter by CBCS category (e.g., CORE, DSE)'),
+        OpenApiParameter(name='is_deleted', type=OpenApiTypes.BOOL, location=OpenApiParameter.QUERY,
+                         description='Filter by deletion status (true/false)'),
+        OpenApiParameter(name='search', type=OpenApiTypes.STR, location=OpenApiParameter.QUERY,
+                         description='Search by course_code or course_name'),
+        OpenApiParameter(name='ordering', type=OpenApiTypes.STR, location=OpenApiParameter.QUERY,
+                         description='Order by: course_code, course_name, created_at, updated_at'),
+    ],
+    examples=[
+        OpenApiExample(
+            'List Courses Example',
+            value=[{'course_code': 'CS101', 'course_name': 'Intro to Programming', 'course_category': 'COMPULSORY'}],
+            response_only=True,
+        )
+    ]
+)
+class CourseViewSet(viewsets.ModelViewSet):
+    """ViewSet for CRUD operations on Course model."""
+    serializer_class = CourseSerializer
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['discipline', 'course_category', 'type', 'cbcs_category', 'is_deleted']
+    search_fields = ['course_code', 'course_name']
+    ordering_fields = ['course_code', 'course_name', 'created_at', 'updated_at']
+    ordering = ['course_code']
+    pagination_class = CoursePagination
+    queryset = Course.objects.all()
+
+    def get_permissions(self):
+        """Dynamic permissions based on action."""
+        if self.action in ['list', 'retrieve']:
+            return [AllowAny()]
+        elif self.action in ['create', 'update', 'partial_update']:
+            return [IsAuthenticated()]
+        elif self.action == 'destroy':
+            return [IsAdminUser()]
+        return [IsAuthenticated()]
+
+    def get_queryset(self):
+        """Filter queryset based on user role."""
+        if self.request.user.is_authenticated and self.request.user.is_staff:
+            return self.queryset
+        return self.queryset.filter(is_deleted=False)
+
+    @extend_schema(
+        description="Soft delete a course by setting is_deleted to true.",
+        responses={204: None}
+    )
+    def perform_destroy(self, instance):
+        instance.is_deleted = True
+        instance.save()
+
+@extend_schema(
+    tags=['Syllabi'],
+    responses={200: SyllabusSerializer(many=True)},
+    parameters=[
+        OpenApiParameter(name='course', type=OpenApiTypes.STR, location=OpenApiParameter.QUERY,
+                         description='Filter by course_code'),
+        OpenApiParameter(name='version', type=OpenApiTypes.STR, location=OpenApiParameter.QUERY,
+                         description='Filter by syllabus version (e.g., 1.0)'),
+        OpenApiParameter(name='is_deleted', type=OpenApiTypes.BOOL, location=OpenApiParameter.QUERY,
+                         description='Filter by deletion status (true/false)'),
+        OpenApiParameter(name='search', type=OpenApiTypes.STR, location=OpenApiParameter.QUERY,
+                         description='Search by course__course_code, course_name, or version'),
+        OpenApiParameter(name='ordering', type=OpenApiTypes.STR, location=OpenApiParameter.QUERY,
+                         description='Order by: course__course_code, version, uploaded_at, updated_at'),
+    ],
+    examples=[
+        OpenApiExample(
+            'List Syllabi Example',
+            value=[{'id': 1, 'course': 'CS101', 'version': '1.0', 'syllabus_file': '/syllabi/2023/10/01/cs101.pdf'}],
+            response_only=True,
+        )
+    ]
+)
+class SyllabusViewSet(viewsets.ModelViewSet):
+    """ViewSet for CRUD operations on Syllabus model."""
+    serializer_class = SyllabusSerializer
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['course', 'version', 'is_deleted']
+    search_fields = ['course__course_code', 'course_name', 'version']
+    ordering_fields = ['course__course_code', 'version', 'uploaded_at', 'updated_at']
+    ordering = ['course__course_code', '-version']
+    pagination_class = SyllabusPagination
+    queryset = Syllabus.objects.all()
+
+    def get_permissions(self):
+        """Dynamic permissions based on action."""
+        if self.action in ['list', 'retrieve']:
+            return [AllowAny()]
+        elif self.action in ['create', 'update', 'partial_update']:
+            return [IsAuthenticated()]
+        elif self.action == 'destroy':
+            return [IsAdminUser()]
+        return [IsAuthenticated()]
+
+    def get_queryset(self):
+        """Filter queryset based on user role."""
+        if self.request.user.is_authenticated and self.request.user.is_staff:
+            return self.queryset
+        return self.queryset.filter(is_deleted=False)
+
+    @extend_schema(
+        description="Soft delete a syllabus by setting is_deleted to true.",
+        responses={204: None}
+    )
+    def perform_destroy(self, instance):
+        instance.is_deleted = True
+        instance.save()
+
+class ChoiceAPIView(APIView):
+    """Base class for retrieving Enum choices."""
+    permission_classes = [AllowAny]
+    choice_class = None
+
+    @extend_schema(
+        responses={200: ChoiceSerializer(many=True)},
+        examples=[
+            OpenApiExample(
+                'Choices Example',
+                value=[{'value': 'COMPULSORY', 'label': 'Compulsory'}],
+                response_only=True,
+            )
+        ]
+    )
+    def get(self, request):
+        if not self.choice_class:
+            return Response({"error": "Choice class not defined"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        choices = self.choice_class.choices()
+        serializer = ChoiceSerializer(choices, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+@extend_schema(tags=['Choices'], description="List available course category options.")
+class CourseCategoryChoicesView(ChoiceAPIView):
+    choice_class = CourseCategory
+
+@extend_schema(tags=['Choices'], description="List available course type options.")
+class CourseTypeChoicesView(ChoiceAPIView):
+    choice_class = CourseType
+
+@extend_schema(tags=['Choices'], description="List available CBCS category options.")
+class CBCSCategoryChoicesView(ChoiceAPIView):
+    choice_class = CBCSCategory
+=========================================================
+# courses/urls.py
+from django.urls import path, include
+from rest_framework.routers import DefaultRouter
+from .views import (
+    CourseViewSet, SyllabusViewSet, CourseCategoryChoicesView,
+    CourseTypeChoicesView, CBCSCategoryChoicesView
+)
+
+router = DefaultRouter()
+router.register(r'courses', CourseViewSet, basename='course')
+router.register(r'syllabi', SyllabusViewSet, basename='syllabus')
+
+urlpatterns = [
+    path('', include(router.urls)),
+    path('choices/course-categories/', CourseCategoryChoicesView.as_view(), name='course-category-choices'),
+    path('choices/course-types/', CourseTypeChoicesView.as_view(), name='course-type-choices'),
+    path('choices/cbcs-categories/', CBCSCategoryChoicesView.as_view(), name='cbcs-category-choices'),
+]
+
+# API Endpoints:
+# - GET/POST /courses/ - List or create courses
+# - GET/PUT/DELETE /courses/{course_code}/ - Retrieve, update, or soft-delete a course
+# - GET/POST /syllabi/ - List or create syllabi
+# - GET/PUT/DELETE /syllabi/{id}/ - Retrieve, update, or soft-delete a syllabus
+# - GET /choices/course-categories/ - List course category options
+# - GET /choices/course-types/ - List course type options
+# - GET /choices/cbcs-categories/ - List CBCS category options
+==========================================================================
+# university/urls.py
+path( 'courses/', include(('courses.urls', 'courses'), namespace='courses'), name='courses-root', ),
+
+=======================================================================
+# validators.py
+from django.core.exceptions import ValidationError
+import os
+
+def validate_pdf(value, max_size_mb=5):
+    """
+    Validate that a file is a PDF and within size limit.
+    
+    Args:
+        value: File object to validate
+        max_size_mb: Maximum file size in megabytes (default: 5)
+    """
+    ext = os.path.splitext(value.name)[1].lower()
+    if ext != '.pdf':
+        raise ValidationError('Only PDF files are allowed.')
+    max_size_bytes = max_size_mb * 1024 * 1024
+    if value.size > max_size_bytes:
+        raise ValidationError(f'File size must be under {max_size_mb}MB.')
+=======================================================================

@@ -69,9 +69,9 @@ export function DynamicForm({
   };
 
   return (
-    <div className="max-w-md mx-auto mt-6 p-6 bg-green-100 border border-green-200 rounded-lg shadow-md">
+    <div className="max-w-md mx-auto mt-6 p-6 bg-green-50 border border-green-200 rounded-lg shadow-md">
       {/* Form title */}
-      <h1 className="text-2xl font-bold mb-6 text-center text-gray-800">{buttonText}</h1>
+      <h1 className="text-2xl font-bold mb-6 text-center text-[#800000]">{buttonText}</h1>
 
       {/* Form element with submission handler */}
       <form
@@ -128,7 +128,7 @@ export function DynamicForm({
                       onChange={handleChange}
                       onBlur={onBlur} // Trigger validation on blur
                       ref={ref} // Reference for focus management
-                      className="mt-1 block w-full p-2 bg-white border border-gray-300 rounded-md focus:ring focus:ring-blue-300 focus:outline-none disabled:bg-gray-100"
+                      className="mt-1 block w-full p-2 bg-white border border-gray-700 rounded-md focus:ring focus:ring-blue-300 focus:outline-none disabled:bg-gray-100"
                       placeholder={field.placeholder || ''} // Placeholder text
                       rows="3" // Default rows for textarea
                       maxLength={field.maxLength || 500} // Max length limit
@@ -151,7 +151,7 @@ export function DynamicForm({
                       onChange={handleChange}
                       onBlur={onBlur}
                       ref={ref}
-                      className="mt-1 block w-full p-2 bg-white border border-gray-300 rounded-md disabled:bg-gray-100"
+                      className="mt-1 block w-full p-2 bg-white border border-gray-700 rounded-md disabled:bg-gray-100"
                       accept={field.accept || ''} // File type restriction
                       disabled={isLoading || isSubmitting}
                       aria-describedby={
@@ -171,7 +171,7 @@ export function DynamicForm({
                       onChange={handleChange}
                       onBlur={onBlur}
                       ref={ref}
-                      className="mt-1 block w-full p-2 bg-white border border-gray-300 rounded-md focus:ring focus:ring-blue-300 focus:outline-none disabled:bg-gray-100"
+                      className="mt-1 block w-full p-2 bg-white border border-gray-700 rounded-md focus:ring focus:ring-blue-300 focus:outline-none disabled:bg-gray-100"
                       disabled={isLoading || isSubmitting}
                       aria-required={field.required || false}
                       aria-describedby={
@@ -203,7 +203,7 @@ export function DynamicForm({
                       onChange={handleChange}
                       onBlur={onBlur}
                       ref={ref}
-                      className="mt-1 block w-full p-2 bg-white border border-gray-300 rounded-md focus:ring focus:ring-blue-300 focus:outline-none disabled:bg-gray-100"
+                      className="mt-1 block w-full p-2 bg-white border border-gray-700 rounded-md focus:ring focus:ring-blue-300 focus:outline-none disabled:bg-gray-100"
                       placeholder={field.placeholder || ''}
                       disabled={isLoading || isSubmitting}
                       aria-required={field.required || false}

@@ -166,7 +166,7 @@ export default function Profile() {
 
   return (
     <ErrorBoundary>
-      <div className="max-w-2xl mx-auto mt-12 p-6 bg-white rounded-lg shadow-lg">
+      <div className="max-w-2xl mx-auto mt-12 p-2 bg-white rounded-lg shadow-lg">
         <ProfileDisplay user={user} />
         <div className="flex flex-col sm:flex-row justify-center space-y-4 sm:space-y-0 sm:space-x-4 mb-6">
           <button

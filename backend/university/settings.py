@@ -76,6 +76,7 @@ INSTALLED_APPS = [
     # Local Apps
     'accounts.apps.AccountsConfig',
     'academics.apps.AcademicsConfig',
+    'courses.apps.CoursesConfig',
 ]
 
 MIDDLEWARE = [
@@ -175,6 +176,7 @@ REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': ('accounts.authentication.CookieJWTAuthentication',),
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
     'DEFAULT_FILTER_BACKENDS': ['django_filters.rest_framework.DjangoFilterBackend'],
+    'DEFAULT_PARSER_CLASSES': ['rest_framework.parsers.MultiPartParser', 'rest_framework.parsers.JSONParser'],
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 10,
     'EXCEPTION_HANDLER': 'university.utils.custom_exception_handler',

@@ -12,6 +12,7 @@ import { useState, useMemo, useRef, useEffect } from 'react';
  * @param {(item: Object) => void} [props.onDelete] - Callback for deleting an item.
  */
 export default function GenericTable({
+  title = [],
   data = [],
   columns,
   loading = false,
@@ -105,6 +106,7 @@ export default function GenericTable({
 
   return (
     <div className="bg-blue-50 border border-blue-200 p-6 rounded-lg shadow-md">
+      <h2 className="text-2xl font-bold mb-6  text-[#800000]">{title}</h2>
       {loading && !data.length ? (
         <p className="text-gray-500 text-center">Loading...</p>
       ) : filteredAndSortedData.length === 0 ? (

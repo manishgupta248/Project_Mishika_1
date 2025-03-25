@@ -12,7 +12,7 @@ export default function ProfileDisplay({ user }) {
     : '/default-profile.jpg';
 
   return (
-    <div className="mb-8 text-center bg-white p-6 rounded-lg shadow-md">
+    <div className="mb-8 text-center bg-green-50 border border-green-200 p-6 rounded-lg shadow-md">
       <img
         src={profilePictureUrl}
         alt={`${user.full_name || user.email}'s Profile Picture`}

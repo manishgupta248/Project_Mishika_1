@@ -25,12 +25,7 @@ urlpatterns = [
     path('academic/', include(('academics.urls', 'academics'), namespace='academic'), name='academic-root',),
 
     # Placeholder for Future Apps
-    # Uncomment and configure as new apps are developed
-    # path(
-    #     'courses/',
-    #     include(('courses.urls', 'courses'), namespace='courses'),
-    #     name='courses-root',
-    # ),
+    path( 'courses/', include(('courses.urls', 'courses'), namespace='courses'), name='courses-root', ),
 ]
 
 # Development Static and Media File Serving
